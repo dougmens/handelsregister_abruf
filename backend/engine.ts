@@ -12,13 +12,10 @@ import {
 } from '../shared/constants';
 import { SearchJob, ErrorCode, Company, User, RateLimitState } from '../shared/types';
 
-// Robust path resolution for ESM
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const STORAGE_DIR = process.env.HR_STORAGE_DIR || path.resolve(__dirname, 'data/pdfs');
-const ASSETS_DIR = path.resolve(__dirname, '..', 'assets', 'sample-pdfs');
-const HR_TMP_DIR = process.env.HR_TMP_DIR || '/tmp/hr';
+// Robust path resolution - use process.cwd() as base to ensure consistency between engine and server
+const STORAGE_DIR = path.resolve(process.cwd(), process.env.HR_STORAGE_DIR || 'data/pdfs');
+const HR_TMP_DIR = path.resolve(process.cwd(), process.env.HR_TMP_DIR || '/tmp/hr');
+const ASSETS_DIR = path.resolve(process.cwd(), 'assets/sample-pdfs');
 
 export class RegiScanEngine {
   private jobs = new Map<string, SearchJob>();
@@ -125,7 +122,6 @@ export class RegiScanEngine {
         await this.executeMockJob(job);
       }
 
-      // Finaler Check: Nur done, wenn pdfUrl existiert
       if (job.result?.pdfUrl) {
         job.status = 'done';
         job.progress = 100;
@@ -189,6 +185,25 @@ export class RegiScanEngine {
     return { docId, sha256, storagePath };
   }
 
+  private findPdfRecursive(dir: string, depth = 0): string | null {
+    if (depth > 2) return null;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          const found = this.findPdfRecursive(fullPath, depth + 1);
+          if (found) return found;
+        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.pdf')) {
+          return fullPath;
+        }
+      }
+    } catch (e) {
+      console.error(`Search error in ${dir}:`, e);
+    }
+    return null;
+  }
+
   private async executeRealJobNode(job: SearchJob): Promise<void> {
     const startTime = Date.now();
     const jobTempDir = path.join(HR_TMP_DIR, `work_${job.id}`);
@@ -198,73 +213,87 @@ export class RegiScanEngine {
     }
 
     return new Promise((resolve, reject) => {
+      let finished = false;
       const cleanName = job.companyName.trim().substring(0, 120);
-      job.protocol.push({ timestamp: Date.now(), message: `Docker Start: Volume-Mount auf ${jobTempDir}`, type: 'info' });
 
-      // CLI erwartet Output-Verzeichnis via --output
-      const docker = spawn('docker', [
+      const finish = (err?: Error) => {
+        if (finished) return;
+        finished = true;
+        this.cleanupTempDir(jobTempDir);
+        if (err) reject(err);
+        else resolve();
+      };
+
+      const dockerArgs = [
         'run', '--rm', 
         '-v', `${jobTempDir}:/out`,
         HR_CLI_IMAGE, 
         '--company', cleanName,
         '--output', '/out'
-      ]);
+      ];
+
+      job.protocol.push({ 
+        timestamp: Date.now(), 
+        message: `Docker Start: ${dockerArgs.join(' ')}`, 
+        type: 'info' 
+      });
+
+      const docker = spawn('docker', dockerArgs);
       
+      docker.stdout.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg) job.protocol.push({ timestamp: Date.now(), message: `CLI STDOUT: ${msg.substring(0, 300)}`, type: 'info' });
+      });
+
+      docker.stderr.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg) job.protocol.push({ timestamp: Date.now(), message: `CLI STDERR: ${msg.substring(0, 300)}`, type: 'error' });
+      });
+
       const timeout = setTimeout(() => {
         docker.kill('SIGKILL');
-        this.cleanupTempDir(jobTempDir);
-        reject(new Error('TIMEOUT'));
+        finish(new Error('TIMEOUT'));
       }, HR_DOCKER_TIMEOUT_SEC * 1000);
 
       docker.on('error', (err) => {
         clearTimeout(timeout);
-        this.cleanupTempDir(jobTempDir);
-        reject(new Error('DOCKER_MISSING'));
+        finish(new Error('DOCKER_MISSING'));
       });
 
       docker.on('close', (code) => {
         clearTimeout(timeout);
-        job.protocol.push({ timestamp: Date.now(), message: `Docker Exit Code: ${code}`, type: 'info' });
+        job.protocol.push({ timestamp: Date.now(), message: `Docker beendet mit Exit Code: ${code}`, type: 'info' });
         
         if (code === 0) {
-          try {
-            // Suche nach PDF im Output
-            const files = fs.readdirSync(jobTempDir);
-            const pdfFile = files.find(f => f.toLowerCase().endsWith('.pdf'));
-
-            if (pdfFile) {
-              const pdfBuffer = fs.readFileSync(path.join(jobTempDir, pdfFile));
+          const pdfPath = this.findPdfRecursive(jobTempDir);
+          if (pdfPath) {
+            try {
+              const pdfBuffer = fs.readFileSync(pdfPath);
               const { docId, sha256 } = this.savePdf(pdfBuffer);
               
               job.result = {
                 summary: {
-                  purpose: 'Daten aus Live-Auszug extrahiert.',
+                  purpose: 'Live-Registerdaten abgerufen.',
                   capital: 'Siehe PDF',
-                  management: ['Extraktion aus PDF folgt'],
+                  management: ['Extraktion aktiv'],
                   procuration: [],
-                  lastChange: 'Live-Abruf'
+                  lastChange: 'Aktueller Abruf'
                 },
                 pdfUrl: `/api/pdf/${docId}`,
                 liveAvailable: true
               };
               job.metadata.sha256 = sha256;
               job.metadata.durationMs = Date.now() - startTime;
-              job.protocol.push({ timestamp: Date.now(), message: `PDF gefunden und archiviert: ${docId}`, type: 'success' });
-              
-              this.cleanupTempDir(jobTempDir);
-              resolve();
-            } else {
-              job.protocol.push({ timestamp: Date.now(), message: "Fehler: Docker beendet, aber kein PDF im Output-Ordner gefunden.", type: 'error' });
-              this.cleanupTempDir(jobTempDir);
-              reject(new Error('PARSE_CHANGED'));
+              job.protocol.push({ timestamp: Date.now(), message: `PDF archiviert: ${docId}`, type: 'success' });
+              finish();
+            } catch (e) {
+              finish(new Error('PROVIDER_ERROR'));
             }
-          } catch (e) {
-            this.cleanupTempDir(jobTempDir);
-            reject(new Error('PROVIDER_ERROR'));
+          } else {
+            finish(new Error('PARSE_CHANGED'));
           }
         } else {
-          this.cleanupTempDir(jobTempDir);
-          reject(new Error('PROVIDER_ERROR'));
+          finish(new Error('PROVIDER_ERROR'));
         }
       });
     });

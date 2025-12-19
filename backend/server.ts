@@ -7,14 +7,12 @@ import { fileURLToPath } from 'url';
 import { RegiScanEngine } from './engine';
 import { Company, ErrorCode } from '../shared/types';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
 const engine = new RegiScanEngine();
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
-const STORAGE_DIR = process.env.HR_STORAGE_DIR || path.resolve(__dirname, 'data/pdfs');
+// Use process.cwd() for absolute consistency
+const STORAGE_DIR = path.resolve(process.cwd(), process.env.HR_STORAGE_DIR || 'data/pdfs');
 
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: true }) as any);
 app.use(express.json() as any);
