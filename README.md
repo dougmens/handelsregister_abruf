@@ -1,11 +1,18 @@
-<div align="center">
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+# RegiScan Intelligence - Phase 2.5 Migration
 
-  <h1>Built with AI Studio</h2>
+Echte Client/Server-Architektur (simuliert in diesem Environment, aber Node.js-ready).
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## Architektur
+- **Backend (`server.ts`)**: Verwaltet eine serielle Job-Queue, Rate-Limiting und Caching.
+- **Frontend**: Nutzt einen `apiClient`, um mit dem Backend zu kommunizieren.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Features
+- **Serial Worker**: Live-Abrufe werden nacheinander verarbeitet, um Bot-Sperren zu vermeiden.
+- **Rate-Limiting**: Global (60/h) und Pro-User (20/h) Limits.
+- **Same-Day Cache**: Identische Abfragen am gleichen Tag werden sofort aus dem Cache bedient.
+- **Docker-CLI Prep**: Logik für den Aufruf des Containers ist im Provider-Layer vorbereitet.
 
-</div>
+## Lokale Ausführung (Real Node)
+1. Backend starten: `npx tsx server.ts` (Port 4000)
+2. Frontend starten: `npm start` (Points to localhost:4000)

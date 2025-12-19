@@ -1,0 +1,5 @@
+{
+  "name": "RegiScan - Phase 2.5 Migration",
+  "description": "Full-Stack Handelsregister Intelligence mit serieller Job-Queue, Rate-Limiting und Docker-Integration.",
+  "requestFramePermissions": []
+}
