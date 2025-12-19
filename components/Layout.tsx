@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, LayoutDashboard, CreditCard, Moon, Sun, Menu, X, Server } from 'lucide-react';
-import { SYSTEM_BANNER } from '../constants';
+import { Shield, ShieldAlert, Moon, Sun, Server, WifiOff } from 'lucide-react';
+import { SYSTEM_BANNER } from '../shared/constants';
 import { apiClient } from '../apiClient';
-import { RateLimitState } from '../types';
+import { RateLimitState } from '../shared/types';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -14,11 +14,17 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab }) => {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
 
   useEffect(() => {
     const fetchLimits = async () => {
-      const limits = await apiClient.getRateLimits();
-      setRateLimit(limits);
+      try {
+        const limits = await apiClient.getRateLimits();
+        setRateLimit(limits);
+        setIsDemo(apiClient.isLocalFallback);
+      } catch (e) {
+        console.error("Layout initialization failed", e);
+      }
     };
     fetchLimits();
     const inv = setInterval(fetchLimits, 5000);
@@ -42,6 +48,11 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab }) =>
               <Shield className="text-white w-5 h-5" />
             </div>
             <span className="font-bold text-xl dark:text-white">RegiScan</span>
+            {isDemo && (
+              <span className="ml-2 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[10px] font-black uppercase rounded flex items-center gap-1">
+                <WifiOff size={10} /> Standalone Mode
+              </span>
+            )}
           </div>
 
           <div className="hidden md:flex gap-6 items-center">
@@ -59,7 +70,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab }) =>
 
             {rateLimit && (
               <div className="flex flex-col items-end">
-                <span className="text-[9px] font-black uppercase text-slate-400">Usage</span>
+                <span className="text-[9px] font-black uppercase text-slate-400">Quota</span>
                 <div className="flex gap-1">
                   {[...Array(5)].map((_, i) => (
                     <div key={i} className={`w-3 h-1 rounded-full ${i < (rateLimit.userCurrent / rateLimit.userMax * 5) ? 'bg-blue-500' : 'bg-slate-200 dark:bg-slate-800'}`} />
@@ -80,7 +91,11 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab }) =>
       <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-8">
         <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-slate-400 uppercase font-bold tracking-widest">
           <div className="flex items-center gap-2">
-            <Server size={14} className="text-green-500" /> API: Live | Node: 22.x
+            {isDemo ? (
+              <span className="flex items-center gap-2 text-amber-500"><ShieldAlert size={14} /> Local Engine (Preview)</span>
+            ) : (
+              <span className="flex items-center gap-2 text-green-500"><Server size={14} /> API: Connected</span>
+            )}
           </div>
           <span>&copy; 2024 RegiScan Intelligence</span>
         </div>

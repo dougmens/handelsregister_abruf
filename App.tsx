@@ -10,7 +10,7 @@ const App: React.FC = () => {
 
   return (
     <Layout activeTab={activeTab} setActiveTab={setActiveTab}>
-      <div className="animate-in fade-in duration-700">
+      <div className="animate-in fade-in slide-in-from-bottom-2 duration-700">
         {activeTab === 'landing' && <Landing onStart={() => setActiveTab('dashboard')} />}
         {activeTab === 'dashboard' && <Dashboard />}
         {activeTab === 'pricing' && <Pricing />}

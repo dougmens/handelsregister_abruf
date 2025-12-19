@@ -29,6 +29,8 @@ class MockBackend {
     const jobId = Math.random().toString(36).substring(7);
     const newJob: SearchJob = {
       id: jobId,
+      // Added missing userId property required by SearchJob interface
+      userId: 'mock_user_123',
       companyId: company.id,
       companyName: company.name,
       status: 'queued',
