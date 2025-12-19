@@ -1,7 +1,6 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { 
   GLOBAL_RATE_LIMIT, 
@@ -240,15 +239,17 @@ export class RegiScanEngine {
 
       const docker = spawn('docker', dockerArgs);
       
-      docker.stdout.on('data', (data) => {
+      const captureOutput = (data: Buffer, prefix: string, type: 'info' | 'error') => {
         const msg = data.toString().trim();
-        if (msg) job.protocol.push({ timestamp: Date.now(), message: `CLI STDOUT: ${msg.substring(0, 300)}`, type: 'info' });
-      });
+        if (msg) {
+          // Truncate message to prevent protocol bloat
+          const truncated = msg.length > 2000 ? msg.substring(0, 1997) + '...' : msg;
+          job.protocol.push({ timestamp: Date.now(), message: `${prefix}: ${truncated}`, type });
+        }
+      };
 
-      docker.stderr.on('data', (data) => {
-        const msg = data.toString().trim();
-        if (msg) job.protocol.push({ timestamp: Date.now(), message: `CLI STDERR: ${msg.substring(0, 300)}`, type: 'error' });
-      });
+      docker.stdout.on('data', (data) => captureOutput(data, 'CLI STDOUT', 'info'));
+      docker.stderr.on('data', (data) => captureOutput(data, 'CLI STDERR', 'error'));
 
       const timeout = setTimeout(() => {
         docker.kill('SIGKILL');
