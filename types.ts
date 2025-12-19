@@ -1,5 +1,5 @@
 
-export type JobStatus = 'queued' | 'running' | 'done' | 'failed';
+export type JobStatus = 'queued' | 'running' | 'done' | 'error';
 
 export type ErrorCode = 
   | 'NO_HIT' 
@@ -39,11 +39,6 @@ export interface SearchJob {
     durationMs: number;
     fetchedAt: number;
     sha256?: string;
-    // Added audit property to track internal rate limit states when a job is initiated
-    audit?: {
-      rateLimitGlobalAtStart: number;
-      rateLimitUserAtStart: number;
-    };
   };
 }
 

@@ -1,5 +1,5 @@
 
-export type JobStatus = 'queued' | 'running' | 'done' | 'failed';
+export type JobStatus = 'queued' | 'running' | 'done' | 'error';
 
 export type ErrorCode = 
   | 'NO_HIT' 

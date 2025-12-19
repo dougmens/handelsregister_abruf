@@ -1,6 +1,7 @@
 
 import { MOCK_COMPANIES, SAMPLE_PDF_URL } from '../constants';
-import { Company, SearchJob, JobResult, JobStatus } from '../types';
+// Switch to shared types for consistency during migration
+import { Company, SearchJob, JobResult, JobStatus } from '../shared/types';
 
 class MockBackend {
   private jobs: SearchJob[] = [];
@@ -38,16 +39,12 @@ class MockBackend {
       createdAt: Date.now(),
       // Fixed: protocol now correctly uses ProtocolEntry objects instead of strings
       protocol: [{ timestamp: Date.now(), message: `Job ${jobId} initialisiert für ${company.name}`, type: 'info' }],
-      // Added missing properties fetchedAt and audit to satisfy the metadata type in SearchJob
+      // Fixed: removed invalid 'audit' property from metadata which caused type error
       metadata: {
         provider: 'mock',
         cacheHit: false,
         durationMs: 0,
-        fetchedAt: Date.now(),
-        audit: {
-          rateLimitGlobalAtStart: 0,
-          rateLimitUserAtStart: 0
-        }
+        fetchedAt: Date.now()
       }
     };
 

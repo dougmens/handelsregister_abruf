@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, History, Loader2, CheckCircle2, AlertCircle, Database, Timer, Clock, ChevronRight, Download, ExternalLink } from 'lucide-react';
 import { apiClient } from '../apiClient';
+// Fixed: Using shared/types to ensure compatibility with apiClient which returns these types
 import { Company, SearchJob, ErrorCode } from '../shared/types';
 import { ERROR_MESSAGES, API_BASE_URL } from '../shared/constants';
 
@@ -34,8 +35,9 @@ const Dashboard: React.FC = () => {
     pollInterval.current = window.setInterval(async () => {
       try {
         const job = await apiClient.getJob(jobId);
+        // Fixed state update typing issue by ensuring use of shared SearchJob type
         setHistory(prev => prev.map(j => j.id === job.id ? job : j));
-        if (job.status === 'done' || job.status === 'failed') {
+        if (job.status === 'done' || job.status === 'error') {
           if (pollInterval.current) clearInterval(pollInterval.current);
         }
       } catch (e) {
@@ -247,7 +249,7 @@ const Dashboard: React.FC = () => {
                     </div>
                   )}
                 </>
-              ) : currentJob.status === 'failed' ? (
+              ) : currentJob.status === 'error' ? (
                 <div className="h-full flex flex-col items-center justify-center p-12 text-center animate-in zoom-in duration-300">
                   <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-full flex items-center justify-center mb-6">
                     <AlertCircle size={40} />
@@ -320,7 +322,7 @@ const MetaTag = ({ icon, label }: { icon: React.ReactNode; label: string }) => (
 
 const StatusIcon = ({ status }: { status: string }) => {
   if (status === 'done') return <CheckCircle2 size={16} className="text-green-500" />;
-  if (status === 'failed') return <AlertCircle size={16} className="text-red-500" />;
+  if (status === 'error') return <AlertCircle size={16} className="text-red-500" />;
   if (status === 'running') return <Loader2 size={16} className="text-blue-500 animate-spin" />;
   return <Clock size={16} className="text-slate-400" />;
 };
@@ -330,7 +332,7 @@ const StatusBadge = ({ status }: { status: string }) => {
     queued: 'bg-slate-100 dark:bg-slate-800 text-slate-500',
     running: 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 animate-pulse',
     done: 'bg-green-100 dark:bg-green-900/30 text-green-600',
-    failed: 'bg-red-100 dark:bg-red-900/30 text-red-600',
+    error: 'bg-red-100 dark:bg-red-900/30 text-red-600',
   };
   return (
     <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${styles[status]}`}>

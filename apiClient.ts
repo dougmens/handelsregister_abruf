@@ -1,9 +1,11 @@
+
 import { API_BASE_URL } from './shared/constants';
+// Standardize on shared types to avoid generic interface mismatches
 import { Company, SearchJob, User, RateLimitState } from './shared/types';
 import { localEngine } from './backend/engine';
 
-// Explicit type definition for apiClient to ensure that 'this' 
-// within methods correctly recognizes generic signatures.
+// Explicit type definition for apiClient to ensure that generic signatures 
+// are correctly recognized within the object implementation.
 export interface ApiClient {
   isLocalFallback: boolean;
   request<T>(path: string, options?: RequestInit): Promise<T>;
@@ -26,13 +28,13 @@ export const apiClient: ApiClient = {
         const err = await res.json();
         throw new Error(err.errorCode || 'UNKNOWN_ERROR');
       }
-      this.isLocalFallback = false;
+      apiClient.isLocalFallback = false;
       return res.json() as Promise<T>;
     } catch (err: any) {
       if (err instanceof TypeError && err.message === 'Failed to fetch') {
-        this.isLocalFallback = true;
-        // Fix: Explicit typing of apiClient ensures handleLocal<T> is recognized as generic.
-        return this.handleLocal<T>(path, options);
+        apiClient.isLocalFallback = true;
+        // Fixed: Explicit reference to apiClient to preserve generic signature
+        return apiClient.handleLocal<T>(path, options);
       }
       throw err;
     }
@@ -74,13 +76,13 @@ export const apiClient: ApiClient = {
   },
 
   async getMe(): Promise<User> {
-    // Fix: Explicit typing ensures request<User> is recognized as generic.
-    return this.request<User>('/api/me');
+    // Fixed: Explicit reference to apiClient to preserve generic signature
+    return apiClient.request<User>('/api/me');
   },
 
   async getRateLimits(): Promise<RateLimitState> {
-    // Fix: Explicit typing ensures request<RateLimitState> is recognized as generic.
-    return this.request<RateLimitState>('/api/limits');
+    // Fixed: Explicit reference to apiClient to preserve generic signature
+    return apiClient.request<RateLimitState>('/api/limits');
   },
 
   async search(query: string): Promise<Company[]> {
@@ -95,8 +97,8 @@ export const apiClient: ApiClient = {
   },
 
   async startJob(company: Company): Promise<string> {
-    // Fix: Explicit typing ensures request<{jobId: string}> is recognized as generic.
-    const data = await this.request<{jobId: string}>('/api/search', {
+    // Fixed: Explicit reference to apiClient to preserve generic signature
+    const data = await apiClient.request<{jobId: string}>('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ company })
@@ -105,12 +107,12 @@ export const apiClient: ApiClient = {
   },
 
   async getJob(jobId: string): Promise<SearchJob> {
-    // Fix: Explicit typing ensures request<SearchJob> is recognized as generic.
-    return this.request<SearchJob>(`/api/jobs/${jobId}`);
+    // Fixed: Explicit reference to apiClient to preserve generic signature
+    return apiClient.request<SearchJob>(`/api/jobs/${jobId}`);
   },
 
   async getHistory(): Promise<SearchJob[]> {
-    // Fix: Explicit typing ensures request<SearchJob[]> is recognized as generic.
-    return this.request<SearchJob[]>('/api/history');
+    // Fixed: Explicit reference to apiClient to preserve generic signature
+    return apiClient.request<SearchJob[]>('/api/history');
   }
 };
