@@ -1,4 +1,3 @@
-
 export type JobStatus = 'queued' | 'running' | 'done' | 'error';
 
 export type ErrorCode = 
@@ -10,7 +9,10 @@ export type ErrorCode =
   | 'DOCKER_MISSING' 
   | 'PROVIDER_ERROR'
   | 'RATE_LIMIT'
-  | 'UNAUTHORIZED';
+  | 'UNAUTHORIZED'
+  | 'BAD_REQUEST'
+  | 'NOT_FOUND'
+  | 'NOT_IMPLEMENTED';
 
 export interface Company {
   id: string;

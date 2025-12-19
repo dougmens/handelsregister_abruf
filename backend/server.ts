@@ -1,17 +1,20 @@
-
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { RegiScanEngine } from './engine';
-import { Company } from '../types';
+import { Company, ErrorCode } from '../shared/types';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const engine = new RegiScanEngine();
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
-const STORAGE_DIR = process.env.HR_STORAGE_DIR || path.resolve(process.cwd(), 'data/pdfs');
+const STORAGE_DIR = process.env.HR_STORAGE_DIR || path.resolve(__dirname, 'data/pdfs');
 
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: true }) as any);
 app.use(express.json() as any);
@@ -44,11 +47,8 @@ app.post('/api/search', authMiddleware, async (req: any, res) => {
     const jobId = await engine.createJob(company, req.userId);
     res.json({ jobId });
   } catch (err: any) {
-    if (err.message === 'RATE_LIMIT') {
-      res.status(429).json({ errorCode: 'RATE_LIMIT' });
-    } else {
-      res.status(500).json({ errorCode: 'PROVIDER_ERROR' });
-    }
+    const errorCode: ErrorCode = err.message === 'RATE_LIMIT' ? 'RATE_LIMIT' : 'PROVIDER_ERROR';
+    res.status(err.message === 'RATE_LIMIT' ? 429 : 500).json({ errorCode });
   }
 });
 
@@ -63,20 +63,20 @@ app.get('/api/history', authMiddleware, (req: any, res) => {
 });
 
 /**
- * SECURE PDF STREAMING
+ * SECURE PDF STREAMING WITH AUTH
  */
-app.get('/api/pdf/:docId', (req, res) => {
+app.get('/api/pdf/:docId', authMiddleware, (req, res) => {
   const docId = req.params.docId;
   
   // Validation: sha256 format check
   if (!/^[a-f0-9]{64}$/.test(docId)) {
-    return res.status(400).send('Invalid document ID format.');
+    return res.status(400).json({ errorCode: 'BAD_REQUEST' });
   }
 
   const filePath = path.join(STORAGE_DIR, `${docId}.pdf`);
 
   if (!fs.existsSync(filePath)) {
-    return res.status(404).send('Document not found.');
+    return res.status(404).json({ errorCode: 'NOT_FOUND' });
   }
 
   res.setHeader('Content-Type', 'application/pdf');
@@ -85,7 +85,7 @@ app.get('/api/pdf/:docId', (req, res) => {
   const stream = fs.createReadStream(filePath);
   stream.on('error', (err) => {
     console.error('PDF Stream Error:', err);
-    if (!res.headersSent) res.status(500).send('Streaming error.');
+    if (!res.headersSent) res.status(500).json({ errorCode: 'PROVIDER_ERROR' });
   });
   stream.pipe(res);
 });

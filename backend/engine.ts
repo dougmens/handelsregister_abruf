@@ -1,7 +1,7 @@
-
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { 
   GLOBAL_RATE_LIMIT, 
@@ -10,9 +10,15 @@ import {
   HR_CLI_IMAGE, 
   HR_DOCKER_TIMEOUT_SEC 
 } from '../shared/constants';
-import { SearchJob, ErrorCode, Company, User, RateLimitState } from '../types';
+import { SearchJob, ErrorCode, Company, User, RateLimitState } from '../shared/types';
 
-const STORAGE_DIR = process.env.HR_STORAGE_DIR || path.resolve(process.cwd(), 'data/pdfs');
+// Robust path resolution for ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const STORAGE_DIR = process.env.HR_STORAGE_DIR || path.resolve(__dirname, 'data/pdfs');
+const ASSETS_DIR = path.resolve(__dirname, '..', 'assets', 'sample-pdfs');
+const HR_TMP_DIR = process.env.HR_TMP_DIR || '/tmp/hr';
 
 export class RegiScanEngine {
   private jobs = new Map<string, SearchJob>();
@@ -31,6 +37,9 @@ export class RegiScanEngine {
   constructor() {
     if (!fs.existsSync(STORAGE_DIR)) {
       fs.mkdirSync(STORAGE_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(HR_TMP_DIR)) {
+      fs.mkdirSync(HR_TMP_DIR, { recursive: true });
     }
   }
 
@@ -59,7 +68,6 @@ export class RegiScanEngine {
     this.cleanLimits();
     const limits = this.getRateLimitState(userId);
 
-    // Enqueue check (Pre-check)
     if (limits.userCurrent >= USER_RATE_LIMIT || limits.globalCurrent >= GLOBAL_RATE_LIMIT) {
       throw new Error('RATE_LIMIT');
     }
@@ -107,7 +115,6 @@ export class RegiScanEngine {
     job.protocol.push({ timestamp: Date.now(), message: 'Worker gestartet. Task reserviert.', type: 'info' });
 
     try {
-      // RATE LIMIT HIT COUNTING (Count when worker starts the actual request)
       this.globalHits.push(Date.now());
       const hits = this.userHits.get(job.userId) || [];
       this.userHits.set(job.userId, [...hits, Date.now()]);
@@ -117,16 +124,22 @@ export class RegiScanEngine {
       } else {
         await this.executeMockJob(job);
       }
-      job.status = 'done';
-      job.progress = 100;
-      job.protocol.push({ timestamp: Date.now(), message: 'Abruf erfolgreich beendet.', type: 'success' });
+
+      // Finaler Check: Nur done, wenn pdfUrl existiert
+      if (job.result?.pdfUrl) {
+        job.status = 'done';
+        job.progress = 100;
+        job.protocol.push({ timestamp: Date.now(), message: 'Abruf erfolgreich beendet.', type: 'success' });
+      } else {
+        throw new Error('PROVIDER_ERROR');
+      }
+
     } catch (err: any) {
       job.status = 'error';
       job.errorCode = err.message as ErrorCode;
       job.protocol.push({ timestamp: Date.now(), message: `Fehler: ${err.message}`, type: 'error' });
     } finally {
       this.isProcessing = false;
-      // Serial Worker Delay (1s as requested)
       setTimeout(() => this.processQueue(), 1000);
     }
   }
@@ -137,15 +150,13 @@ export class RegiScanEngine {
     job.progress = 50;
     job.protocol.push({ timestamp: Date.now(), message: 'Register-Schnittstelle antwortet.', type: 'info' });
     
-    // Server-side PDF mock storage
-    const samplePath = path.resolve(process.cwd(), 'assets/sample-pdfs/sample.pdf');
+    const samplePath = path.join(ASSETS_DIR, 'sample.pdf');
     let pdfBuffer: Buffer;
     
     if (fs.existsSync(samplePath)) {
       pdfBuffer = fs.readFileSync(samplePath);
     } else {
-      // Fallback: Create a minimal dummy PDF buffer if sample missing
-      pdfBuffer = Buffer.from('%PDF-1.4\n%...\n%%EOF');
+      pdfBuffer = Buffer.from('%PDF-1.4\n% Dummy PDF Content\n%%EOF');
     }
 
     const { docId, sha256 } = this.savePdf(pdfBuffer);
@@ -168,7 +179,7 @@ export class RegiScanEngine {
 
   private savePdf(buffer: Buffer): { docId: string, sha256: string, storagePath: string } {
     const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
-    const docId = sha256; // sha256 as docId
+    const docId = sha256;
     const storagePath = path.join(STORAGE_DIR, `${docId}.pdf`);
     
     if (!fs.existsSync(storagePath)) {
@@ -179,33 +190,94 @@ export class RegiScanEngine {
   }
 
   private async executeRealJobNode(job: SearchJob): Promise<void> {
+    const startTime = Date.now();
+    const jobTempDir = path.join(HR_TMP_DIR, `work_${job.id}`);
+    
+    if (!fs.existsSync(jobTempDir)) {
+      fs.mkdirSync(jobTempDir, { recursive: true });
+    }
+
     return new Promise((resolve, reject) => {
       const cleanName = job.companyName.trim().substring(0, 120);
-      job.protocol.push({ timestamp: Date.now(), message: `Docker Spawn: ${HR_CLI_IMAGE} für "${cleanName}"`, type: 'info' });
+      job.protocol.push({ timestamp: Date.now(), message: `Docker Start: Volume-Mount auf ${jobTempDir}`, type: 'info' });
 
-      const docker = spawn('docker', ['run', '--rm', HR_CLI_IMAGE, '--company', cleanName]);
+      // CLI erwartet Output-Verzeichnis via --output
+      const docker = spawn('docker', [
+        'run', '--rm', 
+        '-v', `${jobTempDir}:/out`,
+        HR_CLI_IMAGE, 
+        '--company', cleanName,
+        '--output', '/out'
+      ]);
       
       const timeout = setTimeout(() => {
         docker.kill('SIGKILL');
+        this.cleanupTempDir(jobTempDir);
         reject(new Error('TIMEOUT'));
       }, HR_DOCKER_TIMEOUT_SEC * 1000);
 
       docker.on('error', (err) => {
         clearTimeout(timeout);
+        this.cleanupTempDir(jobTempDir);
         reject(new Error('DOCKER_MISSING'));
       });
 
       docker.on('close', (code) => {
         clearTimeout(timeout);
-        job.protocol.push({ timestamp: Date.now(), message: `Docker beendet (Code=${code}).`, type: 'info' });
+        job.protocol.push({ timestamp: Date.now(), message: `Docker Exit Code: ${code}`, type: 'info' });
+        
         if (code === 0) {
-           job.protocol.push({ timestamp: Date.now(), message: "Noch kein PDF-Output implementiert.", type: 'info' });
-           resolve();
+          try {
+            // Suche nach PDF im Output
+            const files = fs.readdirSync(jobTempDir);
+            const pdfFile = files.find(f => f.toLowerCase().endsWith('.pdf'));
+
+            if (pdfFile) {
+              const pdfBuffer = fs.readFileSync(path.join(jobTempDir, pdfFile));
+              const { docId, sha256 } = this.savePdf(pdfBuffer);
+              
+              job.result = {
+                summary: {
+                  purpose: 'Daten aus Live-Auszug extrahiert.',
+                  capital: 'Siehe PDF',
+                  management: ['Extraktion aus PDF folgt'],
+                  procuration: [],
+                  lastChange: 'Live-Abruf'
+                },
+                pdfUrl: `/api/pdf/${docId}`,
+                liveAvailable: true
+              };
+              job.metadata.sha256 = sha256;
+              job.metadata.durationMs = Date.now() - startTime;
+              job.protocol.push({ timestamp: Date.now(), message: `PDF gefunden und archiviert: ${docId}`, type: 'success' });
+              
+              this.cleanupTempDir(jobTempDir);
+              resolve();
+            } else {
+              job.protocol.push({ timestamp: Date.now(), message: "Fehler: Docker beendet, aber kein PDF im Output-Ordner gefunden.", type: 'error' });
+              this.cleanupTempDir(jobTempDir);
+              reject(new Error('PARSE_CHANGED'));
+            }
+          } catch (e) {
+            this.cleanupTempDir(jobTempDir);
+            reject(new Error('PROVIDER_ERROR'));
+          }
         } else {
+          this.cleanupTempDir(jobTempDir);
           reject(new Error('PROVIDER_ERROR'));
         }
       });
     });
+  }
+
+  private cleanupTempDir(dir: string) {
+    try {
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    } catch (e) {
+      console.error(`Cleanup failed for ${dir}:`, e);
+    }
   }
 
   public getJob(id: string): SearchJob | undefined {
